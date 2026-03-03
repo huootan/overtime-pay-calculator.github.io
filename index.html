@@ -58,7 +58,8 @@
 
         function App() {
             const [month, setMonth] = useState(() => getSavedString('ot_month', '三月'));
-            const [workDays, setWorkDays] = useState(() => getSavedInput('ot_workDays', '13'));
+            // 將原本的 workDays 改為實際休假天數 offDays
+            const [offDays, setOffDays] = useState(() => getSavedInput('ot_offDays', '10'));
             const [restDays, setRestDays] = useState(() => getSavedInput('ot_restDays', ''));
             const [sleepOutDays, setSleepOutDays] = useState(() => getSavedInput('ot_sleepOutDays', ''));
             const [longRestHours, setLongRestHours] = useState(() => getSavedInput('ot_longRestHours', ''));
@@ -83,7 +84,7 @@
             useEffect(() => {
                 try {
                     localStorage.setItem('ot_month', month);
-                    localStorage.setItem('ot_workDays', workDays);
+                    localStorage.setItem('ot_offDays', offDays); // 儲存休假天數
                     localStorage.setItem('ot_restDays', restDays);
                     localStorage.setItem('ot_sleepOutDays', sleepOutDays);
                     localStorage.setItem('ot_longRestHours', longRestHours);
@@ -95,7 +96,7 @@
                 } catch (e) {
                     console.warn("無法儲存設定至瀏覽器，可能是無痕模式限制。");
                 }
-            }, [month, workDays, restDays, sleepOutDays, longRestHours, compDays, leaveDays, hourlyRate, maxOvertimePay, userName]);
+            }, [month, offDays, restDays, sleepOutDays, longRestHours, compDays, leaveDays, hourlyRate, maxOvertimePay, userName]);
 
             // =========================================================
             // Firebase 雙重相容設定 (警消茶水間)
@@ -223,9 +224,15 @@
             const isLargeMonth = totalMonthDays === 31;
             const basicOffLimit = isLargeMonth ? 18 : 17;
             
+            // 計算實際上班天數：總天數 - 休假天數 - 日休天數 - 外宿天數
+            const calcOffDays = safeNum(offDays);
+            const calcRestDays = safeNum(restDays);
+            const calcSleepOutDays = safeNum(sleepOutDays);
+            const calcWorkDays = Math.max(0, totalMonthDays - calcOffDays - calcRestDays - calcSleepOutDays);
+
             // 應服勤與實際超勤運算
             const publicWorkHours = blackDays * 8;
-            const totalWorkHours = (safeNum(workDays) * 22) + (safeNum(restDays) * 14) + (safeNum(sleepOutDays) * 10);
+            const totalWorkHours = (calcWorkDays * 22) + (calcRestDays * 14) + (calcSleepOutDays * 10);
             const compHours = safeNum(compDays) * 12;
             const leaveHours = safeNum(leaveDays) * 8;
             const requiredWorkHours = publicWorkHours - compHours - leaveHours;
@@ -233,9 +240,9 @@
             const totalOvertimeHours = Math.max(0, rawOvertimeHours);
 
             // 休假天數運算
-            const blankDays = totalMonthDays - safeNum(workDays) - safeNum(restDays) - safeNum(sleepOutDays);
-            const extraOffHours = (safeNum(restDays) * 10) + (safeNum(sleepOutDays) * 14) + safeNum(longRestHours);
-            const totalActualOffHours = Math.max(0, (blankDays * 24) + extraOffHours);
+            const extraOffHours = (calcRestDays * 10) + (calcSleepOutDays * 14) + safeNum(longRestHours);
+            // 實際總休假時數 = (全日休假天數 * 24) + 其他零碎休假時數
+            const totalActualOffHours = Math.max(0, (calcOffDays * 24) + extraOffHours);
             
             const displayOffDays = Math.floor(totalActualOffHours / 24);
             const displayOffHours = totalActualOffHours % 24;
@@ -329,16 +336,17 @@
                                         </div>
 
                                         <div className="bg-slate-50 rounded-xl p-5 border border-slate-100">
-                                            <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center"><span className="mr-2">👮</span> 實際出勤天數</h3>
+                                            <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center"><span className="mr-2">👮</span> 出勤與輪休天數</h3>
                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                                <InputCard label="上班天數" desc="22 hr/天" value={workDays} onChange={(v) => { setWorkDays(v); setAiAdvice(''); }} />
+                                                {/* 上班天數改為實際休假天數 */}
+                                                <InputCard label="實際休假天數" desc="全日休假" value={offDays} onChange={(v) => { setOffDays(v); setAiAdvice(''); }} />
                                                 <InputCard label="日休天數" desc="14 hr/天" value={restDays} onChange={(v) => { setRestDays(v); setAiAdvice(''); }} />
                                                 <InputCard label="外宿天數" desc="10 hr/天" value={sleepOutDays} onChange={(v) => { setSleepOutDays(v); setAiAdvice(''); }} />
                                             </div>
                                         </div>
 
                                         <div className="bg-slate-50 rounded-xl p-5 border border-slate-100">
-                                            <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center"><span className="mr-2">🏖️</span> 休息與請假</h3>
+                                            <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center"><span className="mr-2">🏖️</span> 休息與請假折抵</h3>
                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                                 <InputCard label="長休時數" desc="小時計" value={longRestHours} onChange={(v) => { setLongRestHours(v); setAiAdvice(''); }} step="0.5" suffix="hr" />
                                                 <InputCard label="補休天數" desc="12 hr/天" value={compDays} onChange={(v) => { setCompDays(v); setAiAdvice(''); }} step="0.5" suffix="天" />
@@ -439,7 +447,8 @@
                                         <ul className="divide-y divide-slate-100">
                                             <DetailItem label="本月基本休假 (本休)" value={`${basicOffLimit} 天`} sub={`${isLargeMonth ? '大月' : '小月'}規定`} />
                                             <DetailItem label="我的總上班時數" value={`${totalWorkHours} 小時`} />
-                                            <DetailItem label="實際休假天數" value={actualLeaveString} sub="含日休/外宿/長休折算" />
+                                            {/* 將原本的實際休假天數改為顯示自動推算出來的上班天數 */}
+                                            <DetailItem label="上班天數" value={`${calcWorkDays} 天`} sub={`當月 ${totalMonthDays} 天扣除各類休假`} />
                                             <DetailItem label="公務員標準時數" value={`${publicWorkHours} 小時`} sub={`${blackDays}天 × 8hr`} />
                                             <DetailItem label="請休/補休可折抵" value={`${leaveHours + compHours} 小時`} sub="折抵應服勤時數" />
                                             <DetailItem label="折抵後實際應服勤" value={`${requiredWorkHours} 小時`} strong />
