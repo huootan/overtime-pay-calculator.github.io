@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚓 超勤勉煩惱 (大小月精算版)</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 React 與 ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- 引入 Babel 進行 JSX 編譯 -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- 引入 Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Noto Sans TC', sans-serif; 
+            background-color: #f1f5f9;
+        }
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; }
+        .transition-all { transition-property: all; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 300ms; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="text-slate-800 antialiased selection:bg-blue-200">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        const { useState, useEffect, useRef } = React;
+
+        const monthData = [
+            { name: '一月', days: 21, totalDays: 31 }, { name: '二月', days: 14, totalDays: 28 },
+            { name: '三月', days: 22, totalDays: 31 }, { name: '四月', days: 20, totalDays: 30 },
+            { name: '五月', days: 20, totalDays: 31 }, { name: '六月', days: 21, totalDays: 30 },
+            { name: '七月', days: 23, totalDays: 31 }, { name: '八月', days: 21, totalDays: 31 },
+            { name: '九月', days: 20, totalDays: 30 }, { name: '十月', days: 20, totalDays: 31 },
+            { name: '十一月', days: 21, totalDays: 30 }, { name: '十二月', days: 22, totalDays: 31 },
+        ];
+
+        // 讀取 localStorage 暫存的輔助函數 
+        const getSavedString = (key, defaultVal) => {
+            try { return localStorage.getItem(key) ?? defaultVal; } 
+            catch (e) { return defaultVal; }
+        };
+        
+        const getSavedInput = (key, defaultVal) => {
+            try {
+                const saved = localStorage.getItem(key);
+                if (saved === null) return defaultVal;
+                if (saved === '0' && defaultVal === '') return '';
+                return saved;
+            } catch (e) { return defaultVal; }
+        };
+
+        function App() {
+            const [month, setMonth] = useState(() => getSavedString('ot_month', '三月'));
+            const [workDays, setWorkDays] = useState(() => getSavedInput('ot_workDays', '13'));
+            const [restDays, setRestDays] = useState(() => getSavedInput('ot_restDays', ''));
+            const [sleepOutDays, setSleepOutDays] = useState(() => getSavedInput('ot_sleepOutDays', ''));
+            const [longRestHours, setLongRestHours] = useState(() => getSavedInput('ot_longRestHours', ''));
+            const [compDays, setCompDays] = useState(() => getSavedInput('ot_compDays', ''));
+            const [leaveDays, setLeaveDays] = useState(() => getSavedInput('ot_leaveDays', ''));
+            const [hourlyRate, setHourlyRate] = useState(() => getSavedInput('ot_hourlyRate', '177'));
+            const [maxOvertimePay, setMaxOvertimePay] = useState(() => getSavedInput('ot_maxOvertimePay', '19000'));
+
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [aiAdvice, setAiAdvice] = useState('');
+
+            const [user, setUser] = useState(null);
+            const [db, setDb] = useState(null);
+            const [fbDeps, setFbDeps] = useState(null);
+            const [messages, setMessages] = useState([]);
+            const [userName, setUserName] = useState(() => getSavedString('ot_userName', '匿名同仁'));
+            const [newMessage, setNewMessage] = useState('');
+            const [isFirebaseEnabled, setIsFirebaseEnabled] = useState(false);
+            const messagesEndRef = useRef(null);
+
+            // 自動儲存輸入值到 localStorage
+            useEffect(() => {
+                try {
+                    localStorage.setItem('ot_month', month);
+                    localStorage.setItem('ot_workDays', workDays);
+                    localStorage.setItem('ot_restDays', restDays);
+                    localStorage.setItem('ot_sleepOutDays', sleepOutDays);
+                    localStorage.setItem('ot_longRestHours', longRestHours);
+                    localStorage.setItem('ot_compDays', compDays);
+                    localStorage.setItem('ot_leaveDays', leaveDays);
+                    localStorage.setItem('ot_hourlyRate', hourlyRate);
+                    localStorage.setItem('ot_maxOvertimePay', maxOvertimePay);
+                    localStorage.setItem('ot_userName', userName);
+                } catch (e) {
+                    console.warn("無法儲存設定至瀏覽器，可能是無痕模式限制。");
+                }
+            }, [month, workDays, restDays, sleepOutDays, longRestHours, compDays, leaveDays, hourlyRate, maxOvertimePay, userName]);
+
+            // =========================================================
+            // Firebase 雙重相容設定 (警消茶水間)
+            // =========================================================
+            useEffect(() => {
+                let isMounted = true;
+                const initFirebase = async () => {
+                    try {
+                        const isPreviewEnv = typeof __firebase_config !== 'undefined';
+                        const firebaseConfig = isPreviewEnv 
+                            ? JSON.parse(__firebase_config) 
+                            : {
+                                apiKey: "AIzaSyCi79Imox2n1j2AoPcY4nw-54QfPeYzMfo",
+                                authDomain: "overtime-pay-5fae4.firebaseapp.com",
+                                projectId: "overtime-pay-5fae4",
+                                storageBucket: "overtime-pay-5fae4.firebasestorage.app",
+                                messagingSenderId: "1003542286992",
+                                appId: "1:1003542286992:web:a447d243017eb578193e15",
+                                measurementId: "G-TZLR3HX3PJ"
+                            };
+
+                        const [appModule, authModule, firestoreModule] = await Promise.all([
+                            import('https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js'),
+                            import('https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js'),
+                            import('https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js')
+                        ]);
+
+                        const app = appModule.initializeApp(firebaseConfig);
+                        const authInstance = authModule.getAuth(app);
+                        const dbInstance = firestoreModule.getFirestore(app);
+
+                        if (!isMounted) return;
+
+                        setDb(dbInstance);
+                        setFbDeps({
+                            collection: firestoreModule.collection,
+                            addDoc: firestoreModule.addDoc,
+                            onSnapshot: firestoreModule.onSnapshot,
+                            query: firestoreModule.query,
+                            serverTimestamp: firestoreModule.serverTimestamp
+                        });
+                        setIsFirebaseEnabled(true);
+
+                        if (isPreviewEnv && typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await authModule.signInWithCustomToken(authInstance, __initial_auth_token);
+                        } else {
+                            await authModule.signInAnonymously(authInstance);
+                        }
+
+                        authModule.onAuthStateChanged(authInstance, (u) => {
+                            if (isMounted) setUser(u);
+                        });
+
+                    } catch (e) {
+                        console.error("Firebase 初始化失敗:", e);
+                    }
+                };
+                initFirebase();
+                return () => { isMounted = false; };
+            }, []);
+
+            useEffect(() => {
+                if (!user || !db || !fbDeps) return;
+                
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const collectionPath = typeof __firebase_config !== 'undefined' 
+                    ? ['artifacts', appId, 'public', 'data', 'messages'] 
+                    : ['messages'];
+
+                const messagesRef = fbDeps.collection(db, ...collectionPath);
+                const q = fbDeps.query(messagesRef);
+
+                const unsubscribe = fbDeps.onSnapshot(q, (snapshot) => {
+                    const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    msgs.sort((a, b) => {
+                        const timeA = a.createdAt?.toMillis?.() || 0;
+                        const timeB = b.createdAt?.toMillis?.() || 0;
+                        return timeA - timeB;
+                    });
+                    setMessages(msgs);
+                }, (err) => {
+                    console.error("取得留言失敗:", err);
+                });
+
+                return () => unsubscribe();
+            }, [user, db, fbDeps]);
+
+            useEffect(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, [messages]);
+
+            const handleSendMessage = async (e) => {
+                e.preventDefault();
+                if (!user || !db || !fbDeps || !newMessage.trim()) return;
+
+                const currentMessage = newMessage.trim();
+                setNewMessage('');
+
+                try {
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const collectionPath = typeof __firebase_config !== 'undefined' 
+                        ? ['artifacts', appId, 'public', 'data', 'messages'] 
+                        : ['messages'];
+                        
+                    const messagesRef = fbDeps.collection(db, ...collectionPath);
+                    await fbDeps.addDoc(messagesRef, {
+                        text: currentMessage,
+                        author: userName.trim() || '匿名同仁',
+                        userId: user.uid,
+                        createdAt: fbDeps.serverTimestamp()
+                    });
+                } catch (err) {
+                    console.error("發送留言失敗:", err);
+                    setNewMessage(currentMessage);
+                }
+            };
+
+            // ================= 運算邏輯 =================
+            const safeNum = (val) => Number(val) || 0;
+            const currentMonthData = monthData.find(m => m.name === month);
+            const blackDays = currentMonthData ? currentMonthData.days : 0;
+            const totalMonthDays = currentMonthData ? currentMonthData.totalDays : 30;
+            
+            // 新增大小月本休規定 (大月18天、小月17天)
+            const isLargeMonth = totalMonthDays === 31;
+            const basicOffLimit = isLargeMonth ? 18 : 17;
+            
+            // 應服勤與實際超勤運算
+            const publicWorkHours = blackDays * 8;
+            const totalWorkHours = (safeNum(workDays) * 22) + (safeNum(restDays) * 14) + (safeNum(sleepOutDays) * 10);
+            const compHours = safeNum(compDays) * 12;
+            const leaveHours = safeNum(leaveDays) * 8;
+            const requiredWorkHours = publicWorkHours - compHours - leaveHours;
+            const rawOvertimeHours = totalWorkHours - requiredWorkHours - safeNum(longRestHours);
+            const totalOvertimeHours = Math.max(0, rawOvertimeHours);
+
+            // 休假天數運算
+            const blankDays = totalMonthDays - safeNum(workDays) - safeNum(restDays) - safeNum(sleepOutDays);
+            const extraOffHours = (safeNum(restDays) * 10) + (safeNum(sleepOutDays) * 14) + safeNum(longRestHours);
+            const totalActualOffHours = Math.max(0, (blankDays * 24) + extraOffHours);
+            
+            const displayOffDays = Math.floor(totalActualOffHours / 24);
+            const displayOffHours = totalActualOffHours % 24;
+            const actualLeaveString = displayOffHours > 0 ? `${displayOffDays} 天 ${displayOffHours} 小時` : `${displayOffDays} 天`;
+            
+            // 計算超出本休的部分
+            const excessOffHours = totalActualOffHours - (basicOffLimit * 24);
+            const excessDays = Math.floor(Math.max(0, excessOffHours) / 24);
+            const excessHrs = Math.max(0, excessOffHours) % 24;
+
+            // 薪水計算
+            const maxPayableHours = Math.ceil(safeNum(maxOvertimePay) / safeNum(hourlyRate));
+            const usedOvertimeHours = Math.min(totalOvertimeHours, maxPayableHours);
+            const remainingOvertimeHours = Math.max(0, totalOvertimeHours - usedOvertimeHours);
+            const estimatedPay = Math.min(usedOvertimeHours * safeNum(hourlyRate), safeNum(maxOvertimePay));
+            const isMaxedOut = estimatedPay >= safeNum(maxOvertimePay);
+
+            // ================= 智能精算建議 (精簡重點版) =================
+            const analyzeSchedule = () => {
+                setIsAnalyzing(true);
+                setAiAdvice('');
+
+                setTimeout(() => {
+                    const gap = maxPayableHours - totalOvertimeHours;
+                    
+                    // 1. 錢與超勤狀況
+                    let advice1 = '';
+                    if (gap > 0) {
+                        advice1 = `💰 【超勤未滿】\n距離上限還差 ${gap} 小時。建議減少休假，或改排外宿/日休補足時數。`;
+                    } else if (gap === 0) {
+                        advice1 = `💰 【完美達標】\n超勤剛好 ${totalOvertimeHours} 小時，無多餘浪費，效益最大化！`;
+                    } else {
+                        advice1 = `💰 【超勤溢出】\n已達上限！有 ${remainingOvertimeHours} 小時無法領取當月加班費。超勤最後可以結算換錢、嘉獎或補休，若您不缺錢或嘉獎，建議多排休或外宿。`;
+                    }
+
+                    // 2. 本休與休假天數檢核
+                    let advice2 = `🏖️ 【休假檢核】\n本月為${isLargeMonth ? '大' : '小'}月，本休 ${basicOffLimit} 天。`;
+                    if (excessOffHours > 0) {
+                        let excessText = excessDays > 0 ? `${excessDays} 天` : '';
+                        if (excessHrs > 0) excessText += ` ${excessHrs} 小時`;
+                        advice2 += `您共休 ${actualLeaveString}，已超出 ${excessText}。\n⚠️ 提醒：超出本休的部分，請務必依規定打「補休」、「請休」或「長休」！`;
+                    } else {
+                        advice2 += `您目前共休 ${actualLeaveString}，未超出本休。`;
+                    }
+
+                    setAiAdvice(`${advice1}\n\n${advice2}`);
+                    setIsAnalyzing(false);
+                }, 800);
+            };
+
+            return (
+                <div className="min-h-screen pb-16">
+                    <header className="bg-slate-900 text-white pt-8 pb-16 px-4 text-center rounded-b-[3rem] shadow-lg relative z-0">
+                        <div className="max-w-5xl mx-auto flex flex-col items-center justify-center">
+                            <div className="bg-blue-600/30 p-3 rounded-full mb-3 backdrop-blur-sm">
+                                <span className="text-3xl">🚓</span>
+                            </div>
+                            <h1 className="text-4xl md:text-5xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-blue-200 via-white to-blue-200">
+                                超勤勉煩惱
+                            </h1>
+                            <p className="mt-3 text-blue-200 font-medium tracking-widest bg-blue-900/50 px-5 py-1.5 rounded-full text-sm shadow-inner">
+                                115年度版 ✨ 支援大小月本休精算
+                            </p>
+                        </div>
+                    </header>
+
+                    <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 -mt-10 relative z-10">
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+                            <div className="lg:col-span-7 space-y-6">
+                                <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 p-6 md:p-8 border border-slate-100">
+                                    <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+                                        <h2 className="text-xl font-bold flex items-center text-slate-800">
+                                            <span className="bg-amber-100 text-amber-600 p-2 rounded-lg mr-3 text-sm">✏️</span>
+                                            請填寫當月班表
+                                        </h2>
+                                        <span className="text-sm font-medium text-amber-500 bg-amber-50 px-3 py-1 rounded-full border border-amber-100">
+                                            黃色底色為輸入區
+                                        </span>
+                                    </div>
+
+                                    <div className="space-y-8">
+                                        <div>
+                                            <label className="block text-sm font-bold text-slate-500 mb-2">📅 選擇計算月份</label>
+                                            <select 
+                                                className="w-full sm:w-1/2 bg-amber-50/50 hover:bg-amber-50 border-2 border-amber-200 text-slate-800 text-lg rounded-xl focus:ring-4 focus:ring-amber-100 focus:border-amber-400 block p-3 font-bold transition-all cursor-pointer outline-none"
+                                                value={month} 
+                                                onChange={(e) => { setMonth(e.target.value); setAiAdvice(''); }}
+                                            >
+                                                {monthData.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                                            </select>
+                                        </div>
+
+                                        <div className="bg-slate-50 rounded-xl p-5 border border-slate-100">
+                                            <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center"><span className="mr-2">👮</span> 實際出勤天數</h3>
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                <InputCard label="上班天數" desc="22 hr/天" value={workDays} onChange={(v) => { setWorkDays(v); setAiAdvice(''); }} />
+                                                <InputCard label="日休天數" desc="14 hr/天" value={restDays} onChange={(v) => { setRestDays(v); setAiAdvice(''); }} />
+                                                <InputCard label="外宿天數" desc="10 hr/天" value={sleepOutDays} onChange={(v) => { setSleepOutDays(v); setAiAdvice(''); }} />
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-slate-50 rounded-xl p-5 border border-slate-100">
+                                            <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center"><span className="mr-2">🏖️</span> 休息與請假</h3>
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                <InputCard label="長休時數" desc="小時計" value={longRestHours} onChange={(v) => { setLongRestHours(v); setAiAdvice(''); }} step="0.5" suffix="hr" />
+                                                <InputCard label="補休天數" desc="12 hr/天" value={compDays} onChange={(v) => { setCompDays(v); setAiAdvice(''); }} step="0.5" suffix="天" />
+                                                <InputCard label="請休天數" desc="8 hr/天" value={leaveDays} onChange={(v) => { setLeaveDays(v); setAiAdvice(''); }} step="0.5" suffix="天" />
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-blue-50/50 rounded-xl p-5 border border-blue-100">
+                                            <h3 className="text-sm font-bold text-blue-800 mb-4 flex items-center"><span className="mr-2">💰</span> 薪資參數設定</h3>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                <InputCard label="個人時薪" desc="元" value={hourlyRate} onChange={(v) => { setHourlyRate(v); setAiAdvice(''); }} icon="$" />
+                                                <InputCard label="超勤上限" desc="元" value={maxOvertimePay} onChange={(v) => { setMaxOvertimePay(v); setAiAdvice(''); }} step="1000" icon="NT$" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-5 space-y-6">
+                                <div className={`rounded-2xl shadow-xl p-6 relative overflow-hidden transition-all duration-500 ${isMaxedOut ? 'bg-gradient-to-br from-emerald-500 to-teal-700' : 'bg-gradient-to-br from-blue-600 to-indigo-800'}`}>
+                                    <div className="absolute -right-6 -top-6 w-32 h-32 bg-white opacity-10 rounded-full blur-2xl"></div>
+                                    <div className="absolute -left-10 -bottom-10 w-40 h-40 bg-black opacity-10 rounded-full blur-2xl"></div>
+                                    
+                                    <div className="relative z-10">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <h2 className="text-white/80 font-bold text-sm tracking-widest">本月預估超勤金額</h2>
+                                            {isMaxedOut && (
+                                                <span className="bg-white/20 text-white text-xs px-2 py-1 rounded backdrop-blur-md border border-white/30 font-bold flex items-center">
+                                                    👑 已達上限
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-baseline space-x-2">
+                                            <span className="text-3xl text-white/80 font-bold">$</span>
+                                            <span className="text-5xl md:text-6xl font-black text-white tracking-tight">
+                                                {estimatedPay.toLocaleString()}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl shadow-xl p-6 relative overflow-hidden text-white">
+                                    <div className="absolute -right-4 top-1/2 -translate-y-1/2 text-9xl opacity-10">🎁</div>
+                                    <div className="relative z-10 flex items-center justify-between">
+                                        <div>
+                                            <h2 className="text-white/90 font-bold text-sm tracking-widest mb-1">超勤時數 (剩餘)</h2>
+                                            <div className="text-sm text-amber-100 font-medium mb-2">可換錢 / 嘉獎 / 未來補休</div>
+                                            <div className="flex items-baseline space-x-2">
+                                                <span className="text-5xl font-black">{remainingOvertimeHours}</span>
+                                                <span className="text-xl font-bold opacity-80">小時</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl shadow-xl p-6 border border-indigo-100 relative overflow-hidden">
+                                    <h3 className="font-bold text-indigo-900 flex items-center mb-3">
+                                        <span className="text-xl mr-2">✨</span> Uncle
+                                    </h3>
+                                    <p className="text-indigo-700/80 text-sm mb-5 leading-relaxed">
+                                        一鍵分析您的排班！自動檢核是否超過本月本休天數，並計算是否達成效益最大化。
+                                    </p>
+                                    
+                                    {!aiAdvice && !isAnalyzing ? (
+                                        <button 
+                                            onClick={analyzeSchedule}
+                                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-colors flex items-center justify-center"
+                                        >
+                                            ✨ 補啥小
+                                        </button>
+                                    ) : isAnalyzing ? (
+                                        <div className="flex justify-center items-center py-6 bg-white/60 rounded-xl border border-indigo-100 border-dashed">
+                                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                                            <span className="ml-3 text-indigo-700 font-medium tracking-wide">系統精算中...</span>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-white/80 rounded-xl p-5 text-slate-700 shadow-sm border border-indigo-100 leading-relaxed text-sm md:text-base backdrop-blur-sm relative">
+                                            {aiAdvice.split('\n').map((line, i) => (
+                                                <p key={i} className="mb-1 last:mb-0 whitespace-pre-wrap">{line}</p>
+                                            ))}
+                                            <button 
+                                                onClick={analyzeSchedule}
+                                                className="mt-4 inline-flex items-center text-xs text-indigo-500 hover:text-indigo-800 font-bold transition-colors bg-indigo-50 px-3 py-1.5 rounded-lg"
+                                            >
+                                                🔄 重新精算
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 overflow-hidden border border-slate-100">
+                                    <div className="bg-slate-50 py-3 px-6 border-b border-slate-100">
+                                        <h3 className="font-bold text-slate-700 flex items-center">
+                                            <span className="mr-2">📊</span> 計算明細清單
+                                        </h3>
+                                    </div>
+                                    <div className="p-0">
+                                        <ul className="divide-y divide-slate-100">
+                                            <DetailItem label="本月基本休假 (本休)" value={`${basicOffLimit} 天`} sub={`${isLargeMonth ? '大月' : '小月'}規定`} />
+                                            <DetailItem label="我的總上班時數" value={`${totalWorkHours} 小時`} />
+                                            <DetailItem label="實際休假天數" value={actualLeaveString} sub="含日休/外宿/長休折算" />
+                                            <DetailItem label="公務員標準時數" value={`${publicWorkHours} 小時`} sub={`${blackDays}天 × 8hr`} />
+                                            <DetailItem label="請休/補休可折抵" value={`${leaveHours + compHours} 小時`} sub="折抵應服勤時數" />
+                                            <DetailItem label="折抵後實際應服勤" value={`${requiredWorkHours} 小時`} strong />
+                                            <li className="flex justify-between items-center py-4 px-6 bg-blue-50/50">
+                                                <span className="text-slate-700 font-bold">總超勤時數</span>
+                                                <span className="text-xl font-black text-blue-700">{totalOvertimeHours} 小時</span>
+                                            </li>
+                                            <DetailItem label="可領滿標準時數" value={`${maxPayableHours} 小時`} sub={`上限 ÷ 時薪`} />
+                                            <DetailItem label="超勤時數 (實際請領)" value={`${usedOvertimeHours} 小時`} strong />
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {/* ================= 底部：留言板功能 ================= */}
+                        {isFirebaseEnabled && (
+                            <div className="mt-8 max-w-6xl mx-auto bg-white rounded-2xl shadow-xl shadow-slate-200/50 overflow-hidden border border-slate-100 flex flex-col h-[500px]">
+                                <div className="bg-slate-800 py-4 px-6 border-b border-slate-900 flex justify-between items-center">
+                                    <h3 className="font-bold text-white flex items-center text-lg">
+                                        <span className="mr-2">💬</span> 警消茶水間 (公開留言板)
+                                    </h3>
+                                    <div className="flex items-center space-x-2">
+                                        <span className="text-slate-300 text-sm">暱稱:</span>
+                                        <input 
+                                            type="text" 
+                                            className="bg-slate-700 border-none text-white text-sm rounded-md px-3 py-1 w-28 focus:ring-2 focus:ring-blue-400 outline-none"
+                                            value={userName}
+                                            onChange={(e) => setUserName(e.target.value)}
+                                            maxLength={10}
+                                        />
+                                    </div>
+                                </div>
+                                
+                                <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-4 hide-scrollbar">
+                                    {messages.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                                            <span className="text-4xl mb-2">🍃</span>
+                                            <p>目前還沒有人留言，來搶頭香吧！</p>
+                                        </div>
+                                    ) : (
+                                        messages.map((msg) => {
+                                            const isMe = user && msg.userId === user.uid;
+                                            return (
+                                                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                                                    <span className="text-xs text-slate-400 mb-1 px-1">
+                                                        {msg.author} {msg.createdAt ? new Date(msg.createdAt.toMillis()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}
+                                                    </span>
+                                                    <div className={`px-4 py-2.5 rounded-2xl max-w-[80%] md:max-w-[60%] shadow-sm ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-sm'}`}>
+                                                        {msg.text}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                    <div ref={messagesEndRef} />
+                                </div>
+
+                                <div className="p-4 bg-white border-t border-slate-100">
+                                    <form onSubmit={handleSendMessage} className="flex space-x-3">
+                                        <input 
+                                            type="text" 
+                                            className="flex-1 bg-slate-100 border-none text-slate-800 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-400 outline-none transition-shadow"
+                                            placeholder="分享一下你這個月的班表心得吧..."
+                                            value={newMessage}
+                                            onChange={(e) => setNewMessage(e.target.value)}
+                                            maxLength={200}
+                                        />
+                                        <button 
+                                            type="submit" 
+                                            disabled={!newMessage.trim() || !user}
+                                            className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-6 rounded-xl transition-colors shadow-sm flex items-center justify-center"
+                                        >
+                                            發送
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mt-8 text-center text-slate-400 text-sm pb-8">
+                            💡 系統自動帶入 115 年人事行政總處辦公日曆表數據。<br/>
+                            新制規範: 大月(31天)本休18天，小月(30/28天)本休17天。<br/>
+                            出勤折算基準: 上班 22hr / 日休 14hr / 外宿 10hr / 請假 8hr / 補休 12hr。
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        function InputCard({ label, desc, value, onChange, step = "1", suffix = "", icon = "" }) {
+            const paddingLeftClass = icon ? (icon.length >= 3 ? 'pl-14' : 'pl-10') : 'text-center';
+            return (
+                <div className="relative group">
+                    <label className="flex justify-between text-sm font-bold text-slate-600 mb-1.5 px-1">
+                        <span>{label}</span>
+                        <span className="text-slate-400 font-normal text-xs">{desc}</span>
+                    </label>
+                    <div className="relative">
+                        {icon && (
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <span className="text-amber-600 font-bold">{icon}</span>
+                            </div>
+                        )}
+                        <input 
+                            type="number" step={step} min="0" placeholder="0"
+                            className={`w-full bg-[#FFFBEB] hover:bg-[#FEF3C7] border-2 border-amber-200 text-slate-800 rounded-xl focus:ring-4 focus:ring-amber-100 focus:border-amber-400 block p-3 font-bold transition-all outline-none placeholder-slate-400 ${paddingLeftClass} ${suffix ? 'pr-8' : ''}`}
+                            value={value} 
+                            onChange={(e) => onChange(e.target.value)}
+                        />
+                        {suffix && (
+                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                                <span className="text-slate-500 font-medium text-sm">{suffix}</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function DetailItem({ label, value, sub, strong = false }) {
+            return (
+                <li className="flex justify-between items-center py-3 px-6 hover:bg-slate-50 transition-colors">
+                    <div className="flex flex-col">
+                        <span className={`${strong ? 'font-bold text-slate-800' : 'font-medium text-slate-600'}`}>{label}</span>
+                        {sub && <span className="text-xs text-slate-400 mt-0.5">{sub}</span>}
+                    </div>
+                    <span className={`text-base ${strong ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>{value}</span>
+                </li>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
