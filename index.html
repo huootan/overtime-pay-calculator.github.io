@@ -4,14 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🚓 超勤勉煩惱 (大小月精算版)</title>
-    <!-- 引入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 React 與 ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <!-- 引入 Babel 進行 JSX 編譯 -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- 引入 Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
     <style>
         body { 
@@ -56,9 +52,20 @@
             } catch (e) { return defaultVal; }
         };
 
+        // 🛡️ 資安防護：簡易 XSS 跳脫處理
+        const sanitizeHTML = (str) => {
+            if (!str) return '';
+            return str.replace(/[&<>'"]/g, tag => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                "'": '&#39;',
+                '"': '&quot;'
+            }[tag]));
+        };
+
         function App() {
             const [month, setMonth] = useState(() => getSavedString('ot_month', '三月'));
-            // 將原本的 workDays 改為實際休假天數 offDays
             const [offDays, setOffDays] = useState(() => getSavedInput('ot_offDays', '10'));
             const [restDays, setRestDays] = useState(() => getSavedInput('ot_restDays', ''));
             const [sleepOutDays, setSleepOutDays] = useState(() => getSavedInput('ot_sleepOutDays', ''));
@@ -84,7 +91,7 @@
             useEffect(() => {
                 try {
                     localStorage.setItem('ot_month', month);
-                    localStorage.setItem('ot_offDays', offDays); // 儲存休假天數
+                    localStorage.setItem('ot_offDays', offDays); 
                     localStorage.setItem('ot_restDays', restDays);
                     localStorage.setItem('ot_sleepOutDays', sleepOutDays);
                     localStorage.setItem('ot_longRestHours', longRestHours);
@@ -92,31 +99,29 @@
                     localStorage.setItem('ot_leaveDays', leaveDays);
                     localStorage.setItem('ot_hourlyRate', hourlyRate);
                     localStorage.setItem('ot_maxOvertimePay', maxOvertimePay);
-                    localStorage.setItem('ot_userName', userName);
+                    localStorage.setItem('ot_userName', sanitizeHTML(userName));
                 } catch (e) {
                     console.warn("無法儲存設定至瀏覽器，可能是無痕模式限制。");
                 }
             }, [month, offDays, restDays, sleepOutDays, longRestHours, compDays, leaveDays, hourlyRate, maxOvertimePay, userName]);
 
             // =========================================================
-            // Firebase 雙重相容設定 (警消茶水間)
+            // Firebase 設定 (改為 GitHub Pages 適用版本)
             // =========================================================
             useEffect(() => {
                 let isMounted = true;
                 const initFirebase = async () => {
                     try {
-                        const isPreviewEnv = typeof __firebase_config !== 'undefined';
-                        const firebaseConfig = isPreviewEnv 
-                            ? JSON.parse(__firebase_config) 
-                            : {
-                                apiKey: "AIzaSyCi79Imox2n1j2AoPcY4nw-54QfPeYzMfo",
-                                authDomain: "overtime-pay-5fae4.firebaseapp.com",
-                                projectId: "overtime-pay-5fae4",
-                                storageBucket: "overtime-pay-5fae4.firebasestorage.app",
-                                messagingSenderId: "1003542286992",
-                                appId: "1:1003542286992:web:a447d243017eb578193e15",
-                                measurementId: "G-TZLR3HX3PJ"
-                            };
+                        // ⚠️ 步驟：請將這裡換成你全新的 Firebase API 金鑰資訊
+                        const firebaseConfig = {
+                            apiKey: "AIzaSyBPRWl_sHEZAsmRT7BMF8AZqOQVc6B94JY",
+                            authDomain: "overtime-pay-5fae4.firebaseapp.com",
+                            projectId: "overtime-pay-5fae4",
+                            storageBucket: "overtime-pay-5fae4.firebasestorage.app",
+                            messagingSenderId: "1003542286992",
+                            appId: "1:1003542286992:web:a447d243017eb578193e15"
+			    measurementId: "G-TZLR3HX3PJ"
+                        };
 
                         const [appModule, authModule, firestoreModule] = await Promise.all([
                             import('https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js'),
@@ -136,15 +141,14 @@
                             addDoc: firestoreModule.addDoc,
                             onSnapshot: firestoreModule.onSnapshot,
                             query: firestoreModule.query,
-                            serverTimestamp: firestoreModule.serverTimestamp
+                            serverTimestamp: firestoreModule.serverTimestamp,
+                            orderBy: firestoreModule.orderBy,
+                            limit: firestoreModule.limit
                         });
                         setIsFirebaseEnabled(true);
 
-                        if (isPreviewEnv && typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await authModule.signInWithCustomToken(authInstance, __initial_auth_token);
-                        } else {
-                            await authModule.signInAnonymously(authInstance);
-                        }
+                        // GitHub Pages 環境一律使用匿名登入
+                        await authModule.signInAnonymously(authInstance);
 
                         authModule.onAuthStateChanged(authInstance, (u) => {
                             if (isMounted) setUser(u);
@@ -158,16 +162,18 @@
                 return () => { isMounted = false; };
             }, []);
 
+            // 讀取留言
             useEffect(() => {
                 if (!user || !db || !fbDeps) return;
                 
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const collectionPath = typeof __firebase_config !== 'undefined' 
-                    ? ['artifacts', appId, 'public', 'data', 'messages'] 
-                    : ['messages'];
-
-                const messagesRef = fbDeps.collection(db, ...collectionPath);
-                const q = fbDeps.query(messagesRef);
+                // 簡化資料庫路徑，直接指向 messages 集合
+                const messagesRef = fbDeps.collection(db, 'messages');
+                
+                const q = fbDeps.query(
+                    messagesRef,
+                    fbDeps.orderBy("createdAt", "asc"),
+                    fbDeps.limit(100)
+                );
 
                 const unsubscribe = fbDeps.onSnapshot(q, (snapshot) => {
                     const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -184,10 +190,7 @@
                 return () => unsubscribe();
             }, [user, db, fbDeps]);
 
-            useEffect(() => {
-                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-            }, [messages]);
-
+            // 發送留言
             const handleSendMessage = async (e) => {
                 e.preventDefault();
                 if (!user || !db || !fbDeps || !newMessage.trim()) return;
@@ -195,16 +198,14 @@
                 const currentMessage = newMessage.trim();
                 setNewMessage('');
 
+                const safeMessageText = sanitizeHTML(currentMessage).substring(0, 200); 
+                const safeAuthorText = sanitizeHTML(userName.trim() || '匿名同仁').substring(0, 10);
+
                 try {
-                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                    const collectionPath = typeof __firebase_config !== 'undefined' 
-                        ? ['artifacts', appId, 'public', 'data', 'messages'] 
-                        : ['messages'];
-                        
-                    const messagesRef = fbDeps.collection(db, ...collectionPath);
+                    const messagesRef = fbDeps.collection(db, 'messages');
                     await fbDeps.addDoc(messagesRef, {
-                        text: currentMessage,
-                        author: userName.trim() || '匿名同仁',
+                        text: safeMessageText,
+                        author: safeAuthorText,
                         userId: user.uid,
                         createdAt: fbDeps.serverTimestamp()
                     });
@@ -214,23 +215,24 @@
                 }
             };
 
+            useEffect(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, [messages]);
+
             // ================= 運算邏輯 =================
             const safeNum = (val) => Number(val) || 0;
             const currentMonthData = monthData.find(m => m.name === month);
             const blackDays = currentMonthData ? currentMonthData.days : 0;
             const totalMonthDays = currentMonthData ? currentMonthData.totalDays : 30;
             
-            // 新增大小月本休規定 (大月18天、小月17天)
             const isLargeMonth = totalMonthDays === 31;
             const basicOffLimit = isLargeMonth ? 18 : 17;
             
-            // 計算實際上班天數：總天數 - 休假天數 - 日休天數 - 外宿天數
             const calcOffDays = safeNum(offDays);
             const calcRestDays = safeNum(restDays);
             const calcSleepOutDays = safeNum(sleepOutDays);
             const calcWorkDays = Math.max(0, totalMonthDays - calcOffDays - calcRestDays - calcSleepOutDays);
 
-            // 應服勤與實際超勤運算
             const publicWorkHours = blackDays * 8;
             const totalWorkHours = (calcWorkDays * 22) + (calcRestDays * 14) + (calcSleepOutDays * 10);
             const compHours = safeNum(compDays) * 12;
@@ -239,28 +241,24 @@
             const rawOvertimeHours = totalWorkHours - requiredWorkHours - safeNum(longRestHours);
             const totalOvertimeHours = Math.max(0, rawOvertimeHours);
 
-            // 休假天數運算
             const extraOffHours = (calcRestDays * 10) + (calcSleepOutDays * 14) + safeNum(longRestHours);
-            // 實際總休假時數 = (全日休假天數 * 24) + 其他零碎休假時數
             const totalActualOffHours = Math.max(0, (calcOffDays * 24) + extraOffHours);
             
             const displayOffDays = Math.floor(totalActualOffHours / 24);
             const displayOffHours = totalActualOffHours % 24;
             const actualLeaveString = displayOffHours > 0 ? `${displayOffDays} 天 ${displayOffHours} 小時` : `${displayOffDays} 天`;
             
-            // 計算超出本休的部分
             const excessOffHours = totalActualOffHours - (basicOffLimit * 24);
             const excessDays = Math.floor(Math.max(0, excessOffHours) / 24);
             const excessHrs = Math.max(0, excessOffHours) % 24;
 
-            // 薪水計算
             const maxPayableHours = Math.ceil(safeNum(maxOvertimePay) / safeNum(hourlyRate));
             const usedOvertimeHours = Math.min(totalOvertimeHours, maxPayableHours);
             const remainingOvertimeHours = Math.max(0, totalOvertimeHours - usedOvertimeHours);
             const estimatedPay = Math.min(usedOvertimeHours * safeNum(hourlyRate), safeNum(maxOvertimePay));
             const isMaxedOut = estimatedPay >= safeNum(maxOvertimePay);
 
-            // ================= 智能精算建議 (精簡重點版) =================
+            // ================= 智能精算建議 =================
             const analyzeSchedule = () => {
                 setIsAnalyzing(true);
                 setAiAdvice('');
@@ -268,7 +266,6 @@
                 setTimeout(() => {
                     const gap = maxPayableHours - totalOvertimeHours;
                     
-                    // 1. 錢與超勤狀況
                     let advice1 = '';
                     if (gap > 0) {
                         advice1 = `💰 【超勤未滿】\n距離上限還差 ${gap} 小時。建議減少休假，或改排外宿/日休補足時數。`;
@@ -278,7 +275,6 @@
                         advice1 = `💰 【超勤溢出】\n已達上限！有 ${remainingOvertimeHours} 小時無法領取當月加班費。超勤最後可以結算換錢、嘉獎或補休，若您不缺錢或嘉獎，建議多排休或外宿。`;
                     }
 
-                    // 2. 本休與休假天數檢核
                     let advice2 = `🏖️ 【休假檢核】\n本月為${isLargeMonth ? '大' : '小'}月，本休 ${basicOffLimit} 天。`;
                     if (excessOffHours > 0) {
                         let excessText = excessDays > 0 ? `${excessDays} 天` : '';
@@ -338,7 +334,6 @@
                                         <div className="bg-slate-50 rounded-xl p-5 border border-slate-100">
                                             <h3 className="text-sm font-bold text-slate-500 mb-4 flex items-center"><span className="mr-2">👮</span> 出勤與輪休天數</h3>
                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                                {/* 上班天數改為實際休假天數 */}
                                                 <InputCard label="實際休假天數" desc="全日休假" value={offDays} onChange={(v) => { setOffDays(v); setAiAdvice(''); }} />
                                                 <InputCard label="日休天數" desc="14 hr/天" value={restDays} onChange={(v) => { setRestDays(v); setAiAdvice(''); }} />
                                                 <InputCard label="外宿天數" desc="10 hr/天" value={sleepOutDays} onChange={(v) => { setSleepOutDays(v); setAiAdvice(''); }} />
@@ -447,7 +442,6 @@
                                         <ul className="divide-y divide-slate-100">
                                             <DetailItem label="本月基本休假 (本休)" value={`${basicOffLimit} 天`} sub={`${isLargeMonth ? '大月' : '小月'}規定`} />
                                             <DetailItem label="我的總上班時數" value={`${totalWorkHours} 小時`} />
-                                            {/* 將原本的實際休假天數改為顯示自動推算出來的上班天數 */}
                                             <DetailItem label="上班天數" value={`${calcWorkDays} 天`} sub={`當月 ${totalMonthDays} 天扣除各類休假`} />
                                             <DetailItem label="公務員標準時數" value={`${publicWorkHours} 小時`} sub={`${blackDays}天 × 8hr`} />
                                             <DetailItem label="請休/補休可折抵" value={`${leaveHours + compHours} 小時`} sub="折抵應服勤時數" />
@@ -484,105 +478,4 @@
                                 </div>
                                 
                                 <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-4 hide-scrollbar">
-                                    {messages.length === 0 ? (
-                                        <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                                            <span className="text-4xl mb-2">🍃</span>
-                                            <p>目前還沒有人留言，來搶頭香吧！</p>
-                                        </div>
-                                    ) : (
-                                        messages.map((msg) => {
-                                            const isMe = user && msg.userId === user.uid;
-                                            return (
-                                                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                                                    <span className="text-xs text-slate-400 mb-1 px-1">
-                                                        {msg.author} {msg.createdAt ? new Date(msg.createdAt.toMillis()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}
-                                                    </span>
-                                                    <div className={`px-4 py-2.5 rounded-2xl max-w-[80%] md:max-w-[60%] shadow-sm ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-sm'}`}>
-                                                        {msg.text}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })
-                                    )}
-                                    <div ref={messagesEndRef} />
-                                </div>
-
-                                <div className="p-4 bg-white border-t border-slate-100">
-                                    <form onSubmit={handleSendMessage} className="flex space-x-3">
-                                        <input 
-                                            type="text" 
-                                            className="flex-1 bg-slate-100 border-none text-slate-800 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-400 outline-none transition-shadow"
-                                            placeholder="分享一下你這個月的班表心得吧..."
-                                            value={newMessage}
-                                            onChange={(e) => setNewMessage(e.target.value)}
-                                            maxLength={200}
-                                        />
-                                        <button 
-                                            type="submit" 
-                                            disabled={!newMessage.trim() || !user}
-                                            className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold px-6 rounded-xl transition-colors shadow-sm flex items-center justify-center"
-                                        >
-                                            發送
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="mt-8 text-center text-slate-400 text-sm pb-8">
-                            💡 系統自動帶入 115 年人事行政總處辦公日曆表數據。<br/>
-                            新制規範: 大月(31天)本休18天，小月(30/28天)本休17天。<br/>
-                            出勤折算基準: 上班 22hr / 日休 14hr / 外宿 10hr / 請假 8hr / 補休 12hr。
-                        </div>
-                    </main>
-                </div>
-            );
-        }
-
-        function InputCard({ label, desc, value, onChange, step = "1", suffix = "", icon = "" }) {
-            const paddingLeftClass = icon ? (icon.length >= 3 ? 'pl-14' : 'pl-10') : 'text-center';
-            return (
-                <div className="relative group">
-                    <label className="flex justify-between text-sm font-bold text-slate-600 mb-1.5 px-1">
-                        <span>{label}</span>
-                        <span className="text-slate-400 font-normal text-xs">{desc}</span>
-                    </label>
-                    <div className="relative">
-                        {icon && (
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <span className="text-amber-600 font-bold">{icon}</span>
-                            </div>
-                        )}
-                        <input 
-                            type="number" step={step} min="0" placeholder="0"
-                            className={`w-full bg-[#FFFBEB] hover:bg-[#FEF3C7] border-2 border-amber-200 text-slate-800 rounded-xl focus:ring-4 focus:ring-amber-100 focus:border-amber-400 block p-3 font-bold transition-all outline-none placeholder-slate-400 ${paddingLeftClass} ${suffix ? 'pr-8' : ''}`}
-                            value={value} 
-                            onChange={(e) => onChange(e.target.value)}
-                        />
-                        {suffix && (
-                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                <span className="text-slate-500 font-medium text-sm">{suffix}</span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            );
-        }
-
-        function DetailItem({ label, value, sub, strong = false }) {
-            return (
-                <li className="flex justify-between items-center py-3 px-6 hover:bg-slate-50 transition-colors">
-                    <div className="flex flex-col">
-                        <span className={`${strong ? 'font-bold text-slate-800' : 'font-medium text-slate-600'}`}>{label}</span>
-                        {sub && <span className="text-xs text-slate-400 mt-0.5">{sub}</span>}
-                    </div>
-                    <span className={`text-base ${strong ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>{value}</span>
-                </li>
-            );
-        }
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+                                    {messages.length === 0
