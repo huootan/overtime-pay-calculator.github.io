@@ -4,15 +4,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🚓 超勤勉煩惱 (大小月精算版)</title>
+    
     <!-- 引入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 React 與 ReactDOM -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- 1. 新增 Import Map：告訴瀏覽器去哪裡抓取 React 及其 JSX Runtime -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18",
+            "react-dom/client": "https://esm.sh/react-dom@18/client",
+            "react/jsx-runtime": "https://esm.sh/react@18/jsx-runtime"
+        }
+    }
+    </script>
+
     <!-- 引入 Babel 進行 JSX 編譯 -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
     <!-- 引入 Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+    
     <style>
         body { 
             font-family: 'Noto Sans TC', sans-serif; 
@@ -29,8 +41,11 @@
 <body class="text-slate-800 antialiased selection:bg-blue-200">
     <div id="root"></div>
 
+    <!-- 保留 type="text/babel" 與 data-type="module" 以支援 ES Modules -->
     <script type="text/babel" data-type="module">
-        const { useState, useEffect, useRef } = React;
+        // 2. 改用標準的 ES Module 方式引入 React 與 ReactDOM
+        import React, { useState, useEffect, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
 
         const monthData = [
             { name: '一月', days: 21, totalDays: 31 }, { name: '二月', days: 14, totalDays: 28 },
@@ -447,7 +462,6 @@
                                         <ul className="divide-y divide-slate-100">
                                             <DetailItem label="本月基本休假 (本休)" value={`${basicOffLimit} 天`} sub={`${isLargeMonth ? '大月' : '小月'}規定`} />
                                             <DetailItem label="我的總上班時數" value={`${totalWorkHours} 小時`} />
-                                            {/* 將原本的實際休假天數改為顯示自動推算出來的上班天數 */}
                                             <DetailItem label="上班天數" value={`${calcWorkDays} 天`} sub={`當月 ${totalMonthDays} 天扣除各類休假`} />
                                             <DetailItem label="公務員標準時數" value={`${publicWorkHours} 小時`} sub={`${blackDays}天 × 8hr`} />
                                             <DetailItem label="請休/補休可折抵" value={`${leaveHours + compHours} 小時`} sub="折抵應服勤時數" />
@@ -581,7 +595,7 @@
             );
         }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
+        const root = createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
 </body>
